@@ -21,3 +21,6 @@ vim.api.nvim_set_keymap('n', '<leader>a', 'ggVG', { noremap = true })
 -- Resize splits
 vim.api.nvim_set_keymap('n', '<leader>i', ':vertical resize +10<CR>', { noremap = true, silent = true })
 vim.api.nvim_set_keymap('n', '<leader>I', ':resize +3<CR>', { noremap = true, silent = true })
+
+-- Nvim tree find file
+vim.api.nvim_set_keymap('n', '<leader>N', ':NvimTreeFindFile<CR>', { silent = true })
