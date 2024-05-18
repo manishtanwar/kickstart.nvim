@@ -567,6 +567,7 @@ require('lazy').setup({
       --        For example, to see the options for `lua_ls`, you could go to: https://luals.github.io/wiki/settings/
       local servers = {
         jdtls = {},
+        -- kotlin_language_server = {},
         -- clangd = {},
         -- gopls = {},
         -- pyright = {},
@@ -837,7 +838,7 @@ require('lazy').setup({
     'nvim-treesitter/nvim-treesitter',
     build = ':TSUpdate',
     opts = {
-      ensure_installed = { 'bash', 'c', 'diff', 'html', 'lua', 'luadoc', 'markdown', 'vim', 'vimdoc', 'java' },
+      ensure_installed = { 'bash', 'c', 'diff', 'html', 'lua', 'luadoc', 'markdown', 'vim', 'vimdoc', 'java', 'kotlin' },
       -- Autoinstall languages that are not installed
       auto_install = true,
       highlight = {
