@@ -38,4 +38,13 @@ return {
       vim.keymap.set('n', '<leader>n', ':NvimTreeToggle<CR>', { silent = true })
     end,
   },
+  {
+    'nvim-lualine/lualine.nvim',
+
+    config = function()
+      require('lualine').setup()
+    end,
+
+    dependencies = { 'nvim-tree/nvim-web-devicons' },
+  },
 }
