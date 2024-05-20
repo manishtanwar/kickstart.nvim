@@ -566,7 +566,7 @@ require('lazy').setup({
       --  - settings (table): Override the default settings passed when initializing the server.
       --        For example, to see the options for `lua_ls`, you could go to: https://luals.github.io/wiki/settings/
       local servers = {
-        jdtls = {},
+        -- jdtls = {},
         -- kotlin_language_server = {},
         -- clangd = {},
         -- gopls = {},
@@ -916,3 +916,9 @@ require('lazy').setup({
 
 -- [[ Custom Keymaps ]]
 require 'custom.bindings'
+vim.api.nvim_create_autocmd('BufEnter', {
+  pattern = '*',
+  callback = function()
+    vim.diagnostic.hide()
+  end,
+})

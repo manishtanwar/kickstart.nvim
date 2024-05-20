@@ -3,7 +3,7 @@
 --
 -- See the kickstart.nvim README for more information
 return {
-  { 'mfussenegger/nvim-jdtls' },
+  -- { 'mfussenegger/nvim-jdtls' },
   {
     'nvim-tree/nvim-tree.lua',
 
