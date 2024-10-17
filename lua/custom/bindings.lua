@@ -24,3 +24,5 @@ vim.api.nvim_set_keymap('n', '<leader>I', ':resize +3<CR>', { noremap = true, si
 
 -- Nvim tree find file
 vim.api.nvim_set_keymap('n', '<leader>N', ':NvimTreeFindFile<CR>', { silent = true })
+
+vim.opt.fixendofline = false
