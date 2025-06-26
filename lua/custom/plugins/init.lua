@@ -47,4 +47,13 @@ return {
 
     dependencies = { 'nvim-tree/nvim-web-devicons' },
   },
+  -- markdown plugin
+  {
+    'iamcco/markdown-preview.nvim',
+    cmd = { 'MarkdownPreviewToggle', 'MarkdownPreview', 'MarkdownPreviewStop' },
+    ft = { 'markdown' },
+    build = function()
+      vim.fn['mkdp#util#install']()
+    end,
+  },
 }
