@@ -26,3 +26,11 @@ vim.api.nvim_set_keymap('n', '<leader>I', ':resize +3<CR>', { noremap = true, si
 vim.api.nvim_set_keymap('n', '<leader>N', ':NvimTreeFindFile<CR>', { silent = true })
 
 vim.opt.fixendofline = false
+
+-- Json autoformatting
+vim.api.nvim_create_autocmd('FileType', {
+  pattern = 'json',
+  callback = function()
+    vim.opt_local.formatprg = 'jq'
+  end,
+})
