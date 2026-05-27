@@ -56,4 +56,25 @@ return {
       vim.fn['mkdp#util#install']()
     end,
   },
+  {
+    'lervag/vimtex',
+    -- lazy-load vimtex on .tex files
+    ft = { 'tex', 'bib' },
+    config = function()
+      -- This is the default, but it's good to be explicit
+      vim.g.vimtex_compiler_method = 'latexmk'
+
+      -- Configure your PDF viewer
+      -- On Linux/macOS with Zathura
+      vim.g.vimtex_view_method = 'zathura'
+
+      -- On Windows with SumatraPDF, you might need something like this:
+      -- vim.g.vimtex_view_method = 'sumatrapdf'
+      -- vim.g.vimtex_view_sumatrapdf_options = '-forward-search @tex @line @pdf'
+
+      -- Enable continuous compilation and viewing (compiles on save)
+      vim.g.vimtex_compiler_continuous_automatic = 1
+      vim.g.vimtex_view_automatic = 1
+    end,
+  },
 }
