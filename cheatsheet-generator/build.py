@@ -14,10 +14,12 @@ import os
 HERE = os.path.dirname(os.path.abspath(__file__))
 body = open(os.path.join(HERE, ".body.html")).read()
 
-# Split into two "sheets" at the page-break marker authored in the markdown.
+# Split into "sheets" at page-break markers authored in the markdown.
+# Zero markers => one continuous sheet (columns flow/balance across all pages,
+# no forced page break). One marker => front/back split as before.
 MARKER = '<div style="page-break-after: always;"></div>'
 parts = body.split(MARKER)
-assert len(parts) == 2, f"expected 1 page-break marker, found {len(parts) - 1}"
+assert len(parts) <= 2, f"expected at most 1 page-break marker, found {len(parts) - 1}"
 sections = "".join(f'<section class="sheet">{p}</section>' for p in parts)
 
 CSS = """

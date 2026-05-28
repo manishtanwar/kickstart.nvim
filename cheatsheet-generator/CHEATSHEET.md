@@ -163,7 +163,104 @@
 - **TODO/FIXME** comments are highlighted; search them with `<leader>sg` for `TODO`.
 - **Yank** flashes the copied region so you can confirm what you grabbed.
 
-<div style="page-break-after: always;"></div>
+# Workflows & Power Tips
+
+## Reviewing AI-Written Code
+
+The agent edited files; now read every change before you trust it.
+
+**Diffview** (installed with Neogit) — the side-by-side review tool:
+
+| Command | Action |
+|---------|--------|
+| `:DiffviewOpen` | Review **all uncommitted** changes side-by-side |
+| `:DiffviewOpen HEAD~1` | Review everything since the last commit |
+| `:DiffviewOpen main...HEAD` | Review a whole branch / PR vs `main` |
+| `:DiffviewFileHistory %` | History of the **current file** (what changed, when) |
+| `:DiffviewFileHistory` | History of the whole repo / branch |
+| `:DiffviewClose` | Close the review tab |
+
+**Inside the Diffview tab:**
+
+| Key | Action |
+|-----|--------|
+| `<Tab>` / `<S-Tab>` | Next / previous changed file |
+| `]c` / `[c` | Next / previous hunk within the diff |
+| `<CR>` | Open the file under the cursor in the panel |
+| `g?` | Help (all mappings)  ·  `<C-w>w` jump between the two panes |
+
+> **Review loop:** `:DiffviewOpen` → `<Tab>` through every file → read each hunk → if a change is wrong, jump to it and fix or `<leader>hr` (reset hunk) → when clean, stage in Neogit and commit. Use `<leader>hD` (diff vs last commit) for a quick single-file check without leaving the buffer.
+
+**Triage tactics:**
+
+- `<leader>gg` → in the status buffer, `<Tab>` expands each file's diff inline — fast first pass.
+- Stage only the hunks you've verified (`s` / `<leader>hs`); leave the rest unstaged so it's obvious what you still owe a look.
+- `x` in Neogit (or `<leader>hr`) **discards** an AI change you don't want — surgical undo, one hunk at a time.
+- `<leader>hb` blames a suspicious line; `<leader>sw` on a new symbol greps the project for every other place it's used.
+- `Z` in Neogit stashes the working tree so you can compare "before agent" vs "after" cleanly.
+
+---
+
+## Files & Project — nvim-tree
+
+Beyond the basics on the previous page, these built-in nvim-tree keys turn it into a real file manager:
+
+| Key | Action |
+|-----|--------|
+| `<leader>N` | Jump to (reveal) the current file in the tree |
+| `f` / `F` | Live **filter** the tree / clear the filter |
+| `S` | **Search** for a file in the tree |
+| `m` | Mark a file  ·  act on all marks: `bd` delete, `bmv` move, `bc` copy |
+| `P` | Jump to parent node  ·  `<` / `>` previous / next sibling |
+| `J` / `K` | Jump to last / first sibling |
+| `s` | Open file with system default app  ·  `.` prefill a `:` command with its path |
+| `g?` | Full mapping list |
+
+> **Tip:** `<leader>N` is the fastest "where am I?" — it syncs the tree to whatever buffer you're in. Then `y`/`Y`/`gy` to copy the name / relative / absolute path for pasting into a prompt or terminal.
+
+---
+
+## Becoming a Power User (Editor → IDE)
+
+**The three keys that compound:** `.` (repeat last change), `*`/`#` (find word under cursor), and macros (`q`). Master these before anything else.
+
+**Multi-edit without a multi-cursor plugin** — the `cgn` trick:
+
+1. `*` on a word (or `/pattern<CR>`) to search for it.
+2. `cgn` → change the **next match**, type the replacement, `<Esc>`.
+3. `.` repeats it on the next match. `n` to skip one. Faster and safer than blind `:%s`.
+
+**Project-wide refactors:**
+
+| Technique | How |
+|-----------|-----|
+| LSP rename | `grn` on a symbol — renames everywhere safely (semantic, not text) |
+| Grep → quickfix → edit | `<leader>sg` → `<C-q>` → `:cdo s/old/new/g \| update` |
+| Quickfix navigation | `:copen` to view  ·  `:cnext` / `:cprev` to step  ·  `:cdo {cmd}` runs on every entry |
+| Code actions | `gra` — imports, fixes, refactors offered by the LSP |
+
+**Navigation that beats clicking:**
+
+- `grd` definition → `<C-o>` to jump **back**, `<C-i>` forward. The jumplist is your browser history.
+- `grr` references and `gri` implementations open in the quickfix/Telescope — `<C-q>` to keep them all.
+- `gO` / `gW` — fuzzy-jump to any symbol in the file / workspace (an IDE's "Go to Symbol").
+- `g;` / `g,` — hop through the **changelist** (where you last edited), independent of jumps.
+- `<leader>sr` — **resume** your last Telescope search exactly where you left it.
+- Set a mark with `m{letter}`; `` `{letter} `` jumps back from anywhere. `` `` `` toggles between your two most recent spots.
+
+**Windows & layout (IDE-style panes):**
+
+- `:vsp` / `:sp` split; `<C-h/j/k/l>` move between panes; `<leader>i` / `<leader>I` resize.
+- `<C-w>o` close every split but this one  ·  `<C-w>=` equalize sizes  ·  `<C-w>_` / `<C-w>|` maximize height / width.
+- Open a Telescope result in a split with `<C-v>` (vertical) or `<C-x>` (horizontal) instead of `<CR>`.
+
+**Diagnostics & quality:**
+
+- `<leader>q` dumps all diagnostics to the quickfix; `]d` / `[d` step through them in place; `<leader>sd` fuzzy-searches them.
+- `<leader>th` toggles inlay hints (param names, inferred types) — closes much of the gap to an IDE.
+- `<leader>f` formats on demand (also runs on save via conform); `:Mason` to add more formatters/servers.
+
+> **Habit to build:** when you catch yourself repeating an edit, stop and ask "`.`, a macro, or `cgn`?" When you catch yourself scrolling to find something, ask "`grd`, `<leader>sg`, or a mark?" That reflex is the whole difference.
 
 # Vim Basics Reference
 
