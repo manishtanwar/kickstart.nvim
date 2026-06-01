@@ -15,10 +15,6 @@ return {
       -- optionally enable 24-bit colour
       vim.opt.termguicolors = true
 
-      -- empty setup using defaults
-      require('nvim-tree').setup()
-
-      -- OR setup with some options
       require('nvim-tree').setup {
         sort = {
           sorter = 'case_sensitive',
@@ -31,6 +27,11 @@ return {
         },
         filters = {
           dotfiles = false,
+        },
+        git = {
+          -- default is 400ms; bump it so git jobs don't time out and
+          -- disable git integration in larger repos
+          timeout = 5000,
         },
       }
 

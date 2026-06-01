@@ -677,8 +677,29 @@ require('lazy').setup({
       --  - settings (table): Override the default settings passed when initializing the server.
       --        For example, to see the options for `lua_ls`, you could go to: https://luals.github.io/wiki/settings/
       local servers = {
-        -- jdtls = {},
-        -- kotlin_language_server = {},
+        -- jdtls is intentionally NOT listed here.
+        -- It is managed entirely by nvim-jdtls via ftplugin/java.lua.
+        -- Adding it here would cause lspconfig to start a second conflicting
+        -- instance every time you open a .java file.
+
+        -- kotlin_lsp: JetBrains' official Kotlin LSP (IntelliJ-based).
+        -- Mason installs it as 'kotlin-lsp', which ships the `intellij-server`
+        -- binary; lspconfig knows the config as 'kotlin_lsp'.
+        --
+        -- We switched away from the lightweight fwcd 'kotlin-language-server':
+        -- on this 60+ module Gradle repo fwcd never resolves the project
+        -- classpath, so every analysis throws NoTopLevelDescriptorProvider and
+        -- you get no working completion/navigation. kotlin_lsp does a full
+        -- IntelliJ-grade Gradle import on first start (slow — minutes — but it
+        -- actually understands the build). nvim has no LSP `initialize` timeout,
+        -- so the long import is fine here (it is what broke this LSP in Zed).
+        --
+        -- NOTE: mason-lspconfig v2 auto-enables every installed server via
+        -- vim.lsp.enable(); the `handlers` table below is no longer consulted,
+        -- so per-server overrides should go through vim.lsp.config() instead.
+        -- kotlin_lsp needs no overrides — its defaults work for this repo.
+        kotlin_lsp = {},
+
         -- clangd = {},
         -- gopls = {},
         pyright = {},
@@ -724,8 +745,43 @@ require('lazy').setup({
       local ensure_installed = vim.tbl_keys(servers or {})
       vim.list_extend(ensure_installed, {
         'stylua', -- Used to format Lua code
+
+        -- Java toolchain installed via Mason:
+        --   jdtls                → the Java language server (eclipse.jdt.ls)
+        --   google-java-format   → opinionated Java formatter (used by conform)
+        --   java-debug-adapter   → DAP adapter so nvim-dap can debug Java
+        --   vscode-java-test     → JUnit test runner integration for nvim-jdtls
+        'jdtls',
+        'google-java-format',
+        'java-debug-adapter',
+        -- vscode-java-test is not in Mason's registry; install manually via
+        -- :MasonInstall vscode-java-test if you want JUnit runner integration
+
+        -- Kotlin toolchain installed via Mason:
+        --   kotlin-lsp  → JetBrains' Kotlin LSP (listed as kotlin_lsp above; ships `intellij-server`)
+        --   ktlint      → Kotlin linter AND formatter (used by both conform + nvim-lint)
+        'kotlin-lsp',
+        'ktlint',
       })
       require('mason-tool-installer').setup { ensure_installed = ensure_installed }
+
+      -- kotlin_lsp (JetBrains intellij-server) override.
+      -- mason-lspconfig v2 auto-enables this server via vim.lsp.enable(); the
+      -- `handlers` block below is NOT consulted in v2, so overrides must be set
+      -- through vim.lsp.config() here (it merges onto lspconfig's base config).
+      --
+      -- By default intellij-server writes its indexes/caches to a *random*
+      -- temp dir each launch, forcing a full multi-minute Gradle re-import on
+      -- every nvim restart. Pin --system-path to a stable location so restarts
+      -- are incremental.
+      vim.lsp.config('kotlin_lsp', {
+        cmd = {
+          'intellij-server',
+          '--stdio',
+          '--system-path',
+          vim.fn.stdpath 'cache' .. '/kotlin-lsp',
+        },
+      })
 
       require('mason-lspconfig').setup {
         ensure_installed = {}, -- explicitly set to an empty table (Kickstart populates installs via mason-tool-installer)
@@ -776,11 +832,18 @@ require('lazy').setup({
       end,
       formatters_by_ft = {
         lua = { 'stylua' },
-        -- Conform can also run multiple formatters sequentially
-        -- python = { "isort", "black" },
-        --
-        -- You can use 'stop_after_first' to run the first available formatter from the list
-        -- javascript = { "prettierd", "prettier", stop_after_first = true },
+
+        -- google-java-format enforces the Google Java Style Guide.
+        -- It runs as an external process (not the jdtls LSP formatter) so it
+        -- works even if the language server hasn't fully started yet.
+        -- `lsp_format = 'fallback'` (set in format_on_save) means: if
+        -- google-java-format is missing, fall back to jdtls's own formatter.
+        java = { 'google-java-format' },
+
+        -- ktlint is both a linter and a formatter for Kotlin.
+        -- It enforces the Kotlin Coding Conventions and can auto-fix most issues.
+        -- Note: ktlint requires a .editorconfig or accepts Google/Kotlin style.
+        kotlin = { 'ktlint' },
       },
     },
   },
@@ -909,6 +972,11 @@ require('lazy').setup({
   -- Highlight todo, notes, etc in comments
   { 'folke/todo-comments.nvim', event = 'VimEnter', dependencies = { 'nvim-lua/plenary.nvim' }, opts = { signs = false } },
 
+  { -- Comment/uncomment with gc
+    'numToStr/Comment.nvim',
+    opts = {},
+  },
+
   { -- Collection of various small independent plugins/modules
     'echasnovski/mini.nvim',
     config = function()
@@ -952,7 +1020,13 @@ require('lazy').setup({
     main = 'nvim-treesitter.configs', -- Sets main module to use for opts
     -- [[ Configure Treesitter ]] See `:help nvim-treesitter`
     opts = {
-      ensure_installed = { 'bash', 'c', 'diff', 'html', 'lua', 'luadoc', 'markdown', 'markdown_inline', 'query', 'vim', 'vimdoc' },
+      ensure_installed = { 'bash', 'c', 'diff', 'html', 'lua', 'luadoc', 'markdown', 'markdown_inline', 'query', 'vim', 'vimdoc',
+        -- Treesitter provides syntax highlighting and smart text objects
+        -- (e.g. select a function body with `vaf`). These grammars are
+        -- independent of the LSP — they parse the file locally.
+        'java',   -- syntax highlighting for .java files
+        'kotlin', -- syntax highlighting for .kt / .kts files
+      },
       -- Autoinstall languages that are not installed
       auto_install = true,
       highlight = {
@@ -983,7 +1057,10 @@ require('lazy').setup({
   --
   -- require 'kickstart.plugins.debug',
   -- require 'kickstart.plugins.indent_line',
-  -- require 'kickstart.plugins.lint',
+  -- nvim-lint: runs external linters (ktlint for Kotlin) and shows their
+  -- output as LSP-style diagnostics. For Java, jdtls already covers
+  -- diagnostics via LSP, so we only add Kotlin here.
+  require 'kickstart.plugins.lint',
   require 'kickstart.plugins.autopairs',
   -- require 'kickstart.plugins.neo-tree',
   require 'kickstart.plugins.gitsigns', -- adds gitsigns recommend keymaps

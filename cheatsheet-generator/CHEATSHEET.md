@@ -336,6 +336,16 @@ Examples: `dw` delete word · `ci"` change inside quotes · `yap` yank a paragra
 | `` `` `` | Jump back to position before last jump |
 | `'.` | Jump to last edit |
 
+## Tabs
+
+| Key | Action |
+|-----|--------|
+| `gt` / `gT` | Next / previous tab-page |
+| `{n}gt` | Go to tab-page *n* (e.g., `5gt` → tab 5) |
+| `:tabnew` | New tab-page |
+| `:tabclose` | Close tab-page |
+| `:tabs` | List all tabs |
+
 ## Macros
 
 | Key | Action |

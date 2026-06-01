@@ -7,6 +7,17 @@ return {
       local lint = require 'lint'
       lint.linters_by_ft = {
         markdown = { 'markdownlint' },
+
+        -- ktlint for Kotlin: catches style violations that the language server
+        -- doesn't flag (e.g. trailing whitespace, import ordering, wildcard
+        -- imports, missing newline at end of file).
+        -- Note: ktlint also fixes these issues when run as a formatter via
+        -- conform — having it here means you see violations *as you type*,
+        -- not just when you save.
+        kotlin = { 'ktlint' },
+
+        -- Java diagnostics come entirely from jdtls (the language server), so
+        -- we don't add a separate linter entry for Java here.
       }
 
       -- To allow other plugins to add linters to require('lint').linters_by_ft,
