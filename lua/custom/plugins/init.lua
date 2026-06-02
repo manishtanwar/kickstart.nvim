@@ -22,6 +22,11 @@ return {
         view = {
           width = 30,
         },
+        update_focused_file = {
+          -- highlight & reveal the current buffer in the tree as you switch files
+          enable = true,
+          update_root = false,
+        },
         renderer = {
           group_empty = true,
         },

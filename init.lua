@@ -677,27 +677,33 @@ require('lazy').setup({
       --  - settings (table): Override the default settings passed when initializing the server.
       --        For example, to see the options for `lua_ls`, you could go to: https://luals.github.io/wiki/settings/
       local servers = {
-        -- jdtls is intentionally NOT listed here.
-        -- It is managed entirely by nvim-jdtls via ftplugin/java.lua.
-        -- Adding it here would cause lspconfig to start a second conflicting
-        -- instance every time you open a .java file.
-
-        -- kotlin_lsp: JetBrains' official Kotlin LSP (IntelliJ-based).
-        -- Mason installs it as 'kotlin-lsp', which ships the `intellij-server`
-        -- binary; lspconfig knows the config as 'kotlin_lsp'.
+        -- Java + Kotlin are served by TWO language servers, split by filetype:
         --
-        -- We switched away from the lightweight fwcd 'kotlin-language-server':
-        -- on this 60+ module Gradle repo fwcd never resolves the project
-        -- classpath, so every analysis throws NoTopLevelDescriptorProvider and
-        -- you get no working completion/navigation. kotlin_lsp does a full
-        -- IntelliJ-grade Gradle import on first start (slow — minutes — but it
-        -- actually understands the build). nvim has no LSP `initialize` timeout,
-        -- so the long import is fine here (it is what broke this LSP in Zed).
+        --   • kotlin_lsp — JetBrains' IntelliJ-based LSP (Mason package
+        --     'kotlin-lsp', binary `intellij-server`). Scoped to Kotlin (.kt)
+        --     ONLY via the filetypes override below. It runs a full IntelliJ-grade
+        --     Gradle import that actually understands this 60+ module build; the
+        --     lightweight fwcd 'kotlin-language-server' never resolves the
+        --     classpath here (NoTopLevelDescriptorProvider on every analysis) and
+        --     keeps its symbol index in an in-memory H2 db rebuilt on every start
+        --     — no cross-restart cache, so it buys nothing over intellij-server.
+        --     intellij-server re-imports Gradle on each start too, but scoping it
+        --     to .kt halves that work. nvim has no LSP `initialize` timeout, so
+        --     the long import is fine here (it is what broke this LSP in Zed).
+        --
+        --   • jdtls — Eclipse JDT LS for Java (.java), configured via
+        --     vim.lsp.config('jdtls', …) below. Unlike intellij-server it persists
+        --     its workspace/index under a per-repo -data dir and reuses it
+        --     incrementally, giving a real warm-restart cache for Java. We dropped
+        --     it before because, alongside a Java-serving intellij-server, two
+        --     servers indexed the same .java tree and its Eclipse fallback
+        --     littered modules with .project/.classpath/.settings and copied
+        --     sources into bin/. Keeping intellij-server off .java plus forcing
+        --     Gradle import (settings in the jdtls config) avoids that.
         --
         -- NOTE: mason-lspconfig v2 auto-enables every installed server via
         -- vim.lsp.enable(); the `handlers` table below is no longer consulted,
-        -- so per-server overrides should go through vim.lsp.config() instead.
-        -- kotlin_lsp needs no overrides — its defaults work for this repo.
+        -- so per-server overrides go through vim.lsp.config() instead.
         kotlin_lsp = {},
 
         -- clangd = {},
@@ -746,21 +752,17 @@ require('lazy').setup({
       vim.list_extend(ensure_installed, {
         'stylua', -- Used to format Lua code
 
-        -- Java toolchain installed via Mason:
-        --   jdtls                → the Java language server (eclipse.jdt.ls)
+        -- Java + Kotlin toolchain installed via Mason:
+        --   kotlin-lsp           → JetBrains' IntelliJ-based LSP, scoped to
+        --                          Kotlin (.kt) only (config name kotlin_lsp;
+        --                          ships `intellij-server`)
+        --   jdtls                → Eclipse JDT LS for Java (.java), with a
+        --                          persistent per-repo -data cache (config below)
         --   google-java-format   → opinionated Java formatter (used by conform)
-        --   java-debug-adapter   → DAP adapter so nvim-dap can debug Java
-        --   vscode-java-test     → JUnit test runner integration for nvim-jdtls
+        --   ktlint               → Kotlin linter AND formatter (conform + nvim-lint)
+        'kotlin-lsp',
         'jdtls',
         'google-java-format',
-        'java-debug-adapter',
-        -- vscode-java-test is not in Mason's registry; install manually via
-        -- :MasonInstall vscode-java-test if you want JUnit runner integration
-
-        -- Kotlin toolchain installed via Mason:
-        --   kotlin-lsp  → JetBrains' Kotlin LSP (listed as kotlin_lsp above; ships `intellij-server`)
-        --   ktlint      → Kotlin linter AND formatter (used by both conform + nvim-lint)
-        'kotlin-lsp',
         'ktlint',
       })
       require('mason-tool-installer').setup { ensure_installed = ensure_installed }
@@ -772,14 +774,133 @@ require('lazy').setup({
       --
       -- By default intellij-server writes its indexes/caches to a *random*
       -- temp dir each launch, forcing a full multi-minute Gradle re-import on
-      -- every nvim restart. Pin --system-path to a stable location so restarts
-      -- are incremental.
+      -- every nvim restart. We pin --system-path so restarts are incremental.
+      --
+      -- It MUST be per-project, not one global dir. intellij-server is the
+      -- IntelliJ engine and assumes EXCLUSIVE ownership of its system path. A
+      -- single shared path meant every checkout (e.g. review_repo + alt_repo,
+      -- both named 'indihood-server') and every concurrent nvim pointed at the
+      -- same dir, so the instances clobbered each other's workspace model/index:
+      -- system/index/ never consolidated past its 4 KB enumerator and each start
+      -- re-ran the full Gradle import (massive log churn, no usable cache).
+      --
+      -- We key the path by a sha256 of the ABSOLUTE project root — not the leaf
+      -- directory name, since two checkouts can share a leaf ('indihood-server')
+      -- but never a full path. Same project → same hash → reused cache; distinct
+      -- checkouts → isolated caches that don't fight. (Multiple nvims on the SAME
+      -- checkout still share one path and will contend — run one server per
+      -- checkout, or expect a re-import.)
+      -- Resolve the Gradle/Maven build root for a starting dir. In a multi-project
+      -- repo every one of the ~98 modules has its own build.gradle, so rooting at
+      -- the NEAREST build file spawns a separate server per module — each doing
+      -- its own full Gradle import and seeing only a fragment of the project.
+      -- We prefer the single top-level settings.gradle (the real multi-project
+      -- root, unique at the top of this repo) so ONE server covers all modules,
+      -- and fall back to the nearest single-module build file only when there is
+      -- no settings.gradle.
+      --
+      -- We resolve the root ourselves (rather than via root_markers) because
+      -- tiered/nested root_markers crash on Neovim 0.11.1 — vim.fs.root passes the
+      -- inner table into vim.fs.find → joinpath → "invalid value (table)". A flat
+      -- root_markers list would not give settings.gradle priority over a nearer
+      -- build.gradle, which is exactly the bug we are fixing.
+      --
+      -- We deliberately do NOT consider '.git': this is a build-aware server that
+      -- needs a Gradle/Maven root, not the VCS root, and in a git worktree '.git'
+      -- is a file pointing elsewhere — an ambiguous root. A Gradle/Maven project
+      -- always has one of the build markers above anyway.
+      local function gradle_build_root(start)
+        local marker = vim.fs.find({ 'settings.gradle', 'settings.gradle.kts' }, { path = start, upward = true })[1]
+          or vim.fs.find({ 'build.gradle', 'build.gradle.kts', 'pom.xml' }, { path = start, upward = true })[1]
+        return marker and vim.fs.dirname(marker) or nil
+      end
+
+      local function kotlin_lsp_system_path()
+        -- Key the cache by a sha256 of the ABSOLUTE project root (resolved the
+        -- same way as root_dir below), so the cache is tied to the project root
+        -- — not whatever module nvim launched in — and two checkouts that share a
+        -- leaf name ('indihood-server') still get isolated caches.
+        local root = gradle_build_root(vim.fn.getcwd()) or vim.fn.getcwd()
+        local hash = vim.fn.sha256(vim.fn.fnamemodify(root, ':p')):sub(1, 16)
+        return vim.fn.stdpath 'cache' .. '/kotlin-lsp/' .. hash
+      end
+
+      -- filetypes: scope intellij-server to Kotlin only. Java is served by jdtls
+      -- (configured below), which gives a real persistent per-repo cache. Keeping
+      -- this server off .java halves its indexing work and avoids two servers
+      -- fighting over the same .java buffers.
       vim.lsp.config('kotlin_lsp', {
+        filetypes = { 'kotlin' },
+        root_dir = function(bufnr, on_dir)
+          -- Only start (and only call on_dir) when we find a build root; a buffer
+          -- with no Gradle/Maven ancestor gets no kotlin_lsp.
+          local root = gradle_build_root(vim.fs.dirname(vim.api.nvim_buf_get_name(bufnr)))
+          if root then
+            on_dir(root)
+          end
+        end,
         cmd = {
           'intellij-server',
           '--stdio',
           '--system-path',
-          vim.fn.stdpath 'cache' .. '/kotlin-lsp',
+          kotlin_lsp_system_path(),
+        },
+      })
+
+      -- jdtls (Eclipse JDT Language Server) for Java — the cross-restart cache
+      -- intellij-server never gives us. jdtls persists its workspace model +
+      -- index under the -data directory and reuses it incrementally on the next
+      -- start, so a warm restart skips the Gradle re-import.
+      --
+      -- Two overrides on lspconfig's stock jdtls config are essential here:
+      --   • root: its flat root_markers list (nvim < 0.11.3, which is us on
+      --     0.11.1) includes build.gradle, so it would root at the NEAREST module
+      --     and fragment the repo into one jdtls per module. We reuse
+      --     gradle_build_root to pin the single top-level settings.gradle.
+      --   • -data path: stock jdtls keys the workspace by the root's basename
+      --     (':p:h:t'), so two checkouts sharing a leaf ('indihood-server') would
+      --     collide. We key by a sha256 of the absolute root instead — per-repo,
+      --     collision-free, the same scheme as kotlin_lsp_system_path.
+      local function jdtls_data_path()
+        local root = gradle_build_root(vim.fn.getcwd()) or vim.fn.getcwd()
+        local hash = vim.fn.sha256(vim.fn.fnamemodify(root, ':p')):sub(1, 16)
+        return vim.fn.stdpath 'cache' .. '/jdtls/' .. hash
+      end
+
+      vim.lsp.config('jdtls', {
+        filetypes = { 'java' },
+        capabilities = capabilities,
+        root_dir = function(bufnr, on_dir)
+          local root = gradle_build_root(vim.fs.dirname(vim.api.nvim_buf_get_name(bufnr)))
+          if root then
+            on_dir(root)
+          end
+        end,
+        cmd = {
+          'jdtls',
+          -- Default jdtls heap is 1g, which OOMs during the initial Gradle
+          -- import of indihood-server (60+ modules). The OOM corrupts the
+          -- on-disk indexes mid-write, Eclipse "auto-repairs" by deleting
+          -- them, and the next session re-imports from scratch and OOMs
+          -- again — that's why .cache/nvim/jdtls/<hash>/ only ever contained
+          -- the .metadata skeleton. 4g + G1GC clears it.
+          '--jvm-arg=-Xmx4g',
+          '--jvm-arg=-XX:+UseG1GC',
+          '-data',
+          jdtls_data_path(),
+        },
+        settings = {
+          java = {
+            -- Import via Gradle (Buildship), not Eclipse's fallback — the
+            -- fallback is what used to litter modules with .project/.classpath/
+            -- .settings and copy sources into bin/ output folders.
+            import = {
+              gradle = {
+                enabled = true,
+                wrapper = { enabled = true },
+              },
+            },
+          },
         },
       })
 
@@ -797,6 +918,14 @@ require('lazy').setup({
           end,
         },
       }
+
+      -- jdtls is configured above and intentionally enabled for Java. mason-
+      -- lspconfig v2 already auto-enables every installed server via
+      -- vim.lsp.enable(); we make it explicit so Java LSP comes up deterministically
+      -- (our vim.lsp.config('jdtls', …) override supplies cmd + root_dir, so the
+      -- old "attempt to index local 'config'" crash from an unconfigured jdtls
+      -- does not apply).
+      vim.lsp.enable('jdtls')
     end,
   },
 
@@ -834,10 +963,10 @@ require('lazy').setup({
         lua = { 'stylua' },
 
         -- google-java-format enforces the Google Java Style Guide.
-        -- It runs as an external process (not the jdtls LSP formatter) so it
-        -- works even if the language server hasn't fully started yet.
-        -- `lsp_format = 'fallback'` (set in format_on_save) means: if
-        -- google-java-format is missing, fall back to jdtls's own formatter.
+        -- It runs as an external process (not an LSP formatter) so it works even
+        -- if kotlin_lsp hasn't finished its Gradle import yet. `lsp_format =
+        -- 'fallback'` (set in format_on_save) only kicks in if the binary is
+        -- missing — and kotlin_lsp does not format Java, so keep this installed.
         java = { 'google-java-format' },
 
         -- ktlint is both a linter and a formatter for Kotlin.
@@ -1058,7 +1187,7 @@ require('lazy').setup({
   -- require 'kickstart.plugins.debug',
   -- require 'kickstart.plugins.indent_line',
   -- nvim-lint: runs external linters (ktlint for Kotlin) and shows their
-  -- output as LSP-style diagnostics. For Java, jdtls already covers
+  -- output as LSP-style diagnostics. For Java, kotlin_lsp already covers
   -- diagnostics via LSP, so we only add Kotlin here.
   require 'kickstart.plugins.lint',
   require 'kickstart.plugins.autopairs',
@@ -1106,5 +1235,57 @@ vim.api.nvim_create_autocmd('BufEnter', {
   pattern = '*',
   callback = function()
     vim.diagnostic.hide()
+  end,
+})
+
+-- [[ Java / Kotlin decorated block comments ]]
+-- Overrides `gbc` to produce:
+--   /*
+--    * line
+--    */
+local function _block_comment_toggle(srow, erow)
+  local lines = vim.api.nvim_buf_get_lines(0, srow - 1, erow, false)
+  if #lines == 0 then return end
+
+  local is_commented = lines[1]:match('^%s*/%*%s*$') ~= nil
+    and lines[#lines]:match('^%s*%*/%s*$') ~= nil
+
+  if is_commented then
+    local base_indent = lines[1]:match('^(%s*)') or ''
+    local result = {}
+    for i = 2, #lines - 1 do
+      local content = lines[i]:match('^' .. base_indent .. ' %* ?(.*)$')
+        or lines[i]:match('^%s*%* ?(.*)$')
+        or lines[i]
+      table.insert(result, base_indent .. content)
+    end
+    vim.api.nvim_buf_set_lines(0, srow - 1, erow, false, result)
+  else
+    local min_indent = math.huge
+    for _, l in ipairs(lines) do
+      if l:match('%S') then
+        min_indent = math.min(min_indent, #(l:match('^%s*')))
+      end
+    end
+    if min_indent == math.huge then min_indent = 0 end
+    local indent = string.rep(' ', min_indent)
+    local out = { indent .. '/*' }
+    for _, l in ipairs(lines) do
+      out[#out + 1] = indent .. ' * ' .. l:sub(min_indent + 1)
+    end
+    out[#out + 1] = indent .. ' */'
+    vim.api.nvim_buf_set_lines(0, srow - 1, erow, false, out)
+  end
+end
+
+vim.api.nvim_create_autocmd('FileType', {
+  pattern = { 'java', 'kotlin' },
+  callback = function()
+    vim.keymap.set('v', 'gbc', function()
+      _block_comment_toggle(vim.fn.line "'<", vim.fn.line "'>")
+    end, { buffer = true, desc = 'Toggle block comment' })
+    vim.keymap.set('n', 'gbc', function()
+      _block_comment_toggle(vim.fn.line '.', vim.fn.line '.')
+    end, { buffer = true, desc = 'Toggle block comment' })
   end,
 })

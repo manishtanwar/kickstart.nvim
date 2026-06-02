@@ -1,41 +1,24 @@
 -- lua/custom/plugins/java-kotlin.lua
 --
--- This file declares the plugins needed for Java and Kotlin IDE support.
--- Neovim's lazy.nvim plugin manager picks up every file under
--- lua/custom/plugins/ automatically (see init.lua: `{ import = 'custom.plugins' }`).
-
-return {
-
-  -- ───────────────────────────────────────────────────────────────────────────
-  -- JAVA: nvim-jdtls
-  -- ───────────────────────────────────────────────────────────────────────────
-  -- nvim-jdtls wraps the Eclipse JDT Language Server (jdtls) with extra
-  -- features that plain lspconfig cannot provide:
-  --
-  --   • Per-project workspace directories (jdtls requirement)
-  --   • Java-specific code actions: organize imports, extract variable/method
-  --   • DAP (debugger) integration via java-debug-adapter
-  --   • Test runner integration via vscode-java-test
-  --   • Hot code replacement during debug sessions
-  --
-  -- The actual jdtls configuration lives in ftplugin/java.lua, which Neovim
-  -- sources automatically whenever a .java file is opened.
-  -- We only declare the plugin here so lazy.nvim installs it.
-  {
-    'mfussenegger/nvim-jdtls',
-
-    -- ft = 'java': lazy-load this plugin — only load it when you open a Java
-    -- file. This keeps startup time fast for non-Java work.
-    ft = 'java',
-  },
-
-  -- ───────────────────────────────────────────────────────────────────────────
-  -- KOTLIN: kotlin-lsp (JetBrains, IntelliJ-based) via lspconfig
-  -- ───────────────────────────────────────────────────────────────────────────
-  -- Kotlin support is handled by JetBrains' kotlin-lsp (Mason package
-  -- 'kotlin-lsp', binary `intellij-server`), enabled through mason-lspconfig.
-  -- We configure it in init.lua's `servers` table (see the comment there for
-  -- why we moved off the lightweight fwcd kotlin-language-server).
-  --
-  -- Nothing else to declare here for Kotlin — lspconfig handles the rest.
-}
+-- Java + Kotlin IDE support for this repo is handled by a SINGLE language
+-- server: JetBrains' kotlin-lsp (IntelliJ-based, Mason package 'kotlin-lsp',
+-- binary `intellij-server`). Because it is the IntelliJ engine, it indexes and
+-- serves BOTH .kt and .java files in the same Gradle workspace, so cross-
+-- language navigation/identification (Kotlin → Java and back) works from one
+-- index — exactly what you want in this polyglot 60+ module repo.
+--
+-- It is configured entirely in init.lua:
+--   • `servers.kotlin_lsp` in the lspconfig setup
+--   • the `vim.lsp.config('kotlin_lsp', …)` override that pins the cache dir and
+--     extends `filetypes` to include 'java'
+--
+-- We deliberately do NOT use nvim-jdtls / Eclipse JDT anymore. Running jdtls
+-- alongside kotlin_lsp meant two servers indexing the same tree, and jdtls's
+-- Eclipse Gradle import polluted every module with .project/.classpath/
+-- .settings/ and copied .kt sources into bin/ output folders. One IntelliJ-grade
+-- server avoids all of that.
+--
+-- Nothing to install here — Mason installs kotlin-lsp via mason-tool-installer
+-- in init.lua, and lspconfig handles the rest. This file intentionally declares
+-- no plugins.
+return {}
