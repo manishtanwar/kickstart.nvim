@@ -760,10 +760,13 @@ require('lazy').setup({
         --                          persistent per-repo -data cache (config below)
         --   google-java-format   → opinionated Java formatter (used by conform)
         --   ktlint               → Kotlin linter AND formatter (conform + nvim-lint)
+        --   checkstyle           → Java style linter (nvim-lint), pointed at the
+        --                          repo's config/checkstyle/checkstyle.xml
         'kotlin-lsp',
         'jdtls',
         'google-java-format',
         'ktlint',
+        'checkstyle',
       })
       require('mason-tool-installer').setup { ensure_installed = ensure_installed }
 
@@ -867,12 +870,44 @@ require('lazy').setup({
         return vim.fn.stdpath 'cache' .. '/jdtls/' .. hash
       end
 
+      -- Reap orphaned jdtls JVMs before starting a new one. The launcher chain
+      -- (mason bash wrapper → python jdtls script) execs all the way down to
+      -- java, so the JVM is nvim's DIRECT child — a clean :qa shuts it down via
+      -- LSP shutdown/exit. But if nvim dies uncleanly (crash, SIGKILL while the
+      -- multi-minute Gradle import makes it look frozen), the JVM is reparented
+      -- to launchd (PPID 1) and keeps importing forever at full CPU, holding
+      -- the Eclipse workspace lock on our -data dir and fighting the next
+      -- instance for it. Three such orphans once pinned 8 cores.
+      --
+      -- Match conservatively: a java process whose command line carries our
+      -- exact -data path AND whose parent is PID 1. A jdtls owned by any live
+      -- nvim still has that nvim as its parent and never matches.
+      local function reap_orphaned_jdtls(data_path)
+        local pids = vim.fn.systemlist { 'pgrep', '-f', 'eclipse[.]jdt[.]ls' }
+        if vim.v.shell_error ~= 0 then
+          return -- no jdtls processes at all
+        end
+        for _, pid in ipairs(pids) do
+          pid = vim.trim(pid)
+          local info = vim.fn.system { 'ps', '-o', 'ppid=,command=', '-p', pid }
+          local ppid, cmd = info:match '^%s*(%d+)%s+(.*)'
+          if ppid == '1' and cmd and cmd:find(data_path, 1, true) then
+            vim.fn.system { 'kill', pid }
+            vim.notify('jdtls: killed orphaned instance (pid ' .. pid .. ') left by a dead nvim', vim.log.levels.WARN)
+          end
+        end
+      end
+
       vim.lsp.config('jdtls', {
         filetypes = { 'java' },
         capabilities = capabilities,
         root_dir = function(bufnr, on_dir)
           local root = gradle_build_root(vim.fs.dirname(vim.api.nvim_buf_get_name(bufnr)))
           if root then
+            -- Last hook before vim.lsp spawns the server: sweep orphans on our
+            -- -data dir so the new instance doesn't fight a dead nvim's JVM
+            -- for the workspace lock.
+            reap_orphaned_jdtls(jdtls_data_path())
             on_dir(root)
           end
         end,
@@ -969,10 +1004,27 @@ require('lazy').setup({
         -- missing — and kotlin_lsp does not format Java, so keep this installed.
         java = { 'google-java-format' },
 
-        -- ktlint is both a linter and a formatter for Kotlin.
-        -- It enforces the Kotlin Coding Conventions and can auto-fix most issues.
-        -- Note: ktlint requires a .editorconfig or accepts Google/Kotlin style.
-        kotlin = { 'ktlint' },
+        -- ktlint is both a linter and a formatter for Kotlin. It reads the
+        -- repo's .editorconfig (indihood-server pins 2-space indent and
+        -- disables a batch of wrapping rules there), resolved via the cwd
+        -- override below. Skip test sources to mirror the repo's Gradle
+        -- ktlint filter, which excludes '/test/' paths — format-on-save
+        -- shouldn't rewrite files the project doesn't lint.
+        kotlin = function(bufnr)
+          if vim.api.nvim_buf_get_name(bufnr):find('/test/', 1, true) then
+            return {}
+          end
+          return { 'ktlint' }
+        end,
+      },
+      formatters = {
+        ktlint = {
+          -- ktlint resolves .editorconfig relative to its cwd when fed
+          -- stdin; anchor it to the repo root, not wherever nvim started.
+          cwd = function(_, ctx)
+            return vim.fs.root(ctx.filename, '.editorconfig')
+          end,
+        },
       },
     },
   },
