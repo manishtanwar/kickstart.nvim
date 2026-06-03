@@ -21,18 +21,17 @@ return {
         java = { 'checkstyle' },
       }
 
-      -- ktlint 0.49.1 CLI activates the trailing-comma rules by default
-      -- (it inherits IntelliJ's ij_kotlin_allow_trailing_comma=true), while
-      -- indihood-server's ktlint-gradle 11.4.0 build does not — so CI stays
-      -- quiet but the editor lights up. Disable the rules locally to keep
-      -- editor lint in sync with CI.
+      -- Run ktlint on the saved FILE, not via stdin, so editor diagnostics
+      -- match CI exactly. Mason ktlint is pinned to 0.47.1 (the version
+      -- indihood-server's ktlint-gradle 11.4.0 resolves — see init.lua), but
+      -- 0.47.1 over stdin can't match the repo's `[*.{kt,kts}]` .editorconfig
+      -- section (no filename) and would flag every line as 4-space-indented.
+      -- File mode lets nvim-lint append the real path so .editorconfig (2-space)
+      -- resolves. 0.47.1's JSON reporter writes to stdout (0.49 used stderr).
       local ktlint = lint.linters.ktlint
-      ktlint.args = vim.list_extend(
-        vim.deepcopy(ktlint.args),
-        {
-          '--disabled_rules=standard:trailing-comma-on-call-site,standard:trailing-comma-on-declaration-site',
-        }
-      )
+      ktlint.stdin = false
+      ktlint.args = { '--reporter=json' } -- nvim-lint appends the buffer's path
+      ktlint.stream = 'stdout'
 
       -- Point checkstyle at the project's own config when the buffer lives in
       -- a Gradle repo that carries one (indihood-server keeps it at
@@ -98,29 +97,46 @@ return {
       -- lint.linters_by_ft['terraform'] = nil
       -- lint.linters_by_ft['text'] = nil
 
+      -- The actual linting callback, shared across events.
+      local function do_lint()
+        -- Only run the linter in buffers that you can modify in order to
+        -- avoid superfluous noise, notably within the handy LSP pop-ups that
+        -- describe the hovered symbol using Markdown.
+        if not vim.bo.modifiable then
+          return
+        end
+        -- Mirror indihood-server's Gradle ktlint filter, which excludes
+        -- test sources ('/test/' in the path) from lint.
+        local fname = vim.api.nvim_buf_get_name(0)
+        if vim.bo.filetype == 'kotlin' and fname:find('/test/', 1, true) then
+          return
+        end
+        -- Run from the buffer's project root so ktlint resolves the repo's
+        -- .editorconfig even when nvim was started elsewhere (worktrees).
+        local root = vim.fs.root(0, { '.editorconfig', 'settings.gradle', 'settings.gradle.kts' })
+        lint.try_lint(nil, { cwd = root })
+      end
+
       -- Create autocommand which carries out the actual linting
       -- on the specified events.
       local lint_augroup = vim.api.nvim_create_augroup('lint', { clear = true })
-      vim.api.nvim_create_autocmd({ 'BufEnter', 'BufWritePost', 'InsertLeave' }, {
+
+      -- ktlint 0.47.1 is a cold-start JVM process (~1-2s per launch), so
+      -- linting Kotlin on BufEnter/InsertLeave thrashes the CPU and lags
+      -- diagnostics. Restrict Kotlin to save only; format-on-save (conform)
+      -- plus CI cover the rest. Java/checkstyle keeps the live events.
+      vim.api.nvim_create_autocmd({ 'BufEnter', 'InsertLeave' }, {
         group = lint_augroup,
         callback = function()
-          -- Only run the linter in buffers that you can modify in order to
-          -- avoid superfluous noise, notably within the handy LSP pop-ups that
-          -- describe the hovered symbol using Markdown.
-          if not vim.bo.modifiable then
+          if vim.bo.filetype == 'kotlin' then
             return
           end
-          -- Mirror indihood-server's Gradle ktlint filter, which excludes
-          -- test sources ('/test/' in the path) from lint.
-          local fname = vim.api.nvim_buf_get_name(0)
-          if vim.bo.filetype == 'kotlin' and fname:find('/test/', 1, true) then
-            return
-          end
-          -- Run from the buffer's project root so ktlint resolves the repo's
-          -- .editorconfig even when nvim was started elsewhere (worktrees).
-          local root = vim.fs.root(0, { '.editorconfig', 'settings.gradle', 'settings.gradle.kts' })
-          lint.try_lint(nil, { cwd = root })
+          do_lint()
         end,
+      })
+      vim.api.nvim_create_autocmd('BufWritePost', {
+        group = lint_augroup,
+        callback = do_lint,
       })
     end,
   },

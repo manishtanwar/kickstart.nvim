@@ -805,15 +805,23 @@ require('lazy').setup({
         --                          persistent per-repo -data cache (config below)
         --   google-java-format   → opinionated Java formatter (used by conform)
         --   ktlint               → Kotlin linter AND formatter (conform + nvim-lint).
-        --                          Pinned to the version bundled by the
-        --                          ktlint-gradle plugin 11.4.0 used in
-        --                          indihood-server so editor lint matches CI.
+        --                          Pinned to 0.47.1 — the EXACT ktlint that
+        --                          indihood-server's ktlint-gradle 11.4.0
+        --                          resolves (verified via `gradlew
+        --                          :module:dependencies --configuration ktlint`).
+        --                          Matching the version byte-for-byte is what
+        --                          keeps editor format/lint in sync with CI:
+        --                          ktlint 0.49 added rules CI never runs
+        --                          (function-return-type-spacing,
+        --                          block-comment-initial-star-alignment) and
+        --                          flipped the trailing-comma defaults, so a
+        --                          newer CLI rewrites code CI is happy with.
         --   checkstyle           → Java style linter (nvim-lint), pointed at the
         --                          repo's config/checkstyle/checkstyle.xml
         'kotlin-lsp',
         'jdtls',
         'google-java-format',
-        { 'ktlint', version = '0.49.1' },
+        { 'ktlint', version = '0.47.1' },
         'checkstyle',
       })
       require('mason-tool-installer').setup { ensure_installed = ensure_installed }
@@ -1076,11 +1084,27 @@ require('lazy').setup({
       },
       formatters = {
         ktlint = {
-          -- ktlint resolves .editorconfig relative to its cwd when fed
-          -- stdin; anchor it to the repo root, not wherever nvim started.
-          cwd = function(_, ctx)
-            return vim.fs.root(ctx.filename, '.editorconfig')
-          end,
+          -- Run ktlint on a FILE, not via stdin. This is what makes
+          -- format-on-save match CI byte-for-byte:
+          --
+          --   • Mason ktlint is pinned to 0.47.1 (see ensure_installed) — the
+          --     exact ktlint indihood-server's ktlint-gradle 11.4.0 resolves —
+          --     so no rules CI doesn't run (trailing commas,
+          --     function-return-type-spacing, block-comment-star, …).
+          --   • BUT 0.47.1 over stdin can't match the repo's
+          --     `[*.{kt,kts}]` .editorconfig section (stdin has no filename),
+          --     so it would reindent everything to its 4-space default.
+          --     Feeding it a real file fixes that: conform writes the buffer
+          --     to `.conform.<rand>.<name>.kt` NEXT TO the source, so ktlint
+          --     walks up to the repo's .editorconfig (2-space) just like CI.
+          --   • 0.47.1 also predates `--log-level`, so we pass neither it nor
+          --     conform's stdin default args.
+          stdin = false,
+          args = { '--format', '$FILENAME' },
+          -- ktlint --format exits 1 when violations remain that it can't
+          -- auto-fix (e.g. the temp file's name trips the `filename` rule);
+          -- the buffer is still formatted, so accept 1 and read it back.
+          exit_codes = { 0, 1 },
         },
       },
     },
