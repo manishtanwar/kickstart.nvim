@@ -21,6 +21,19 @@ return {
         java = { 'checkstyle' },
       }
 
+      -- ktlint 0.49.1 CLI activates the trailing-comma rules by default
+      -- (it inherits IntelliJ's ij_kotlin_allow_trailing_comma=true), while
+      -- indihood-server's ktlint-gradle 11.4.0 build does not — so CI stays
+      -- quiet but the editor lights up. Disable the rules locally to keep
+      -- editor lint in sync with CI.
+      local ktlint = lint.linters.ktlint
+      ktlint.args = vim.list_extend(
+        vim.deepcopy(ktlint.args),
+        {
+          '--disabled_rules=standard:trailing-comma-on-call-site,standard:trailing-comma-on-declaration-site',
+        }
+      )
+
       -- Point checkstyle at the project's own config when the buffer lives in
       -- a Gradle repo that carries one (indihood-server keeps it at
       -- config/checkstyle/checkstyle.xml); otherwise fall back to the

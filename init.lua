@@ -171,6 +171,9 @@ vim.o.scrolloff = 10
 -- See `:help 'confirm'`
 vim.o.confirm = true
 
+-- Auto-load: re-read files that changed on disk outside of nvim
+vim.o.autoread = true
+
 -- [[ Basic Keymaps ]]
 --  See `:help vim.keymap.set()`
 
@@ -221,6 +224,48 @@ vim.api.nvim_create_autocmd('TextYankPost', {
   group = vim.api.nvim_create_augroup('kickstart-highlight-yank', { clear = true }),
   callback = function()
     vim.hl.on_yank()
+  end,
+})
+
+-- [[ Auto-save and auto-load ]]
+-- Auto-save: write modified buffers when leaving insert mode or on focus loss.
+vim.api.nvim_create_autocmd({ 'InsertLeave', 'TextChanged', 'FocusLost', 'BufLeave' }, {
+  desc = 'Auto-save modified buffers',
+  group = vim.api.nvim_create_augroup('auto-save', { clear = true }),
+  callback = function(event)
+    local buf = event.buf
+    -- Only save normal, modifiable, named file buffers that have unsaved changes.
+    if
+      vim.bo[buf].modified
+      and vim.bo[buf].buftype == ''
+      and vim.bo[buf].modifiable
+      and not vim.bo[buf].readonly
+      and vim.api.nvim_buf_get_name(buf) ~= ''
+    then
+      vim.api.nvim_buf_call(buf, function()
+        vim.cmd 'silent! write'
+      end)
+    end
+  end,
+})
+
+-- Auto-load: check for external file changes and reload (works with autoread above).
+vim.api.nvim_create_autocmd({ 'FocusGained', 'BufEnter', 'CursorHold', 'CursorHoldI' }, {
+  desc = 'Reload files changed on disk',
+  group = vim.api.nvim_create_augroup('auto-read', { clear = true }),
+  callback = function()
+    if vim.bo.buftype == '' and vim.fn.getcmdwintype() == '' then
+      vim.cmd 'silent! checktime'
+    end
+  end,
+})
+
+-- Notify when a file is reloaded due to an external change.
+vim.api.nvim_create_autocmd('FileChangedShellPost', {
+  desc = 'Notify on external file change reload',
+  group = vim.api.nvim_create_augroup('auto-read-notify', { clear = true }),
+  callback = function()
+    vim.notify('File changed on disk. Buffer reloaded.', vim.log.levels.WARN)
   end,
 })
 
@@ -759,13 +804,16 @@ require('lazy').setup({
         --   jdtls                → Eclipse JDT LS for Java (.java), with a
         --                          persistent per-repo -data cache (config below)
         --   google-java-format   → opinionated Java formatter (used by conform)
-        --   ktlint               → Kotlin linter AND formatter (conform + nvim-lint)
+        --   ktlint               → Kotlin linter AND formatter (conform + nvim-lint).
+        --                          Pinned to the version bundled by the
+        --                          ktlint-gradle plugin 11.4.0 used in
+        --                          indihood-server so editor lint matches CI.
         --   checkstyle           → Java style linter (nvim-lint), pointed at the
         --                          repo's config/checkstyle/checkstyle.xml
         'kotlin-lsp',
         'jdtls',
         'google-java-format',
-        'ktlint',
+        { 'ktlint', version = '0.49.1' },
         'checkstyle',
       })
       require('mason-tool-installer').setup { ensure_installed = ensure_installed }
@@ -987,9 +1035,18 @@ require('lazy').setup({
         local disable_filetypes = { c = true, cpp = true }
         if disable_filetypes[vim.bo[bufnr].filetype] then
           return nil
+        elseif vim.bo[bufnr].filetype == 'kotlin' and vim.api.nvim_buf_get_name(bufnr):find('/test/', 1, true) then
+          -- Kotlin test files have no conform formatter (ktlint skips them to
+          -- mirror the repo's Gradle filter), so lsp_format = 'fallback' would
+          -- hand the buffer to the Kotlin LSP, which reindents at 4 spaces
+          -- (official Kotlin style) and ignores .editorconfig. Don't format
+          -- these on save at all.
+          return nil
         else
           return {
-            timeout_ms = 500,
+            -- ktlint is a JVM CLI; cold start alone is ~1s, so the default
+            -- 500ms timeout fails every Kotlin save. Give it headroom.
+            timeout_ms = vim.bo[bufnr].filetype == 'kotlin' and 5000 or 500,
             lsp_format = 'fallback',
           }
         end
