@@ -38,6 +38,18 @@ return {
           -- disable git integration in larger repos
           timeout = 5000,
         },
+        on_attach = function(bufnr)
+          local api = require('nvim-tree.api')
+          -- keep all of nvim-tree's default mappings
+          api.map.on_attach.default(bufnr)
+          -- nvim-tree crashes (E5108) when an open/preview action runs on a line
+          -- with no node (e.g. the blank area below the last entry). Guard <Tab>.
+          vim.keymap.set('n', '<Tab>', function()
+            if api.tree.get_node_under_cursor() then
+              api.node.open.preview()
+            end
+          end, { desc = 'nvim-tree: Open Preview', buffer = bufnr, noremap = true, silent = true, nowait = true })
+        end,
       }
 
       -- Key mappings
