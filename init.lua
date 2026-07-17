@@ -724,8 +724,9 @@ require('lazy').setup({
       local servers = {
         -- Java + Kotlin are served by TWO language servers, split by filetype:
         --
-        --   • kotlin_lsp — JetBrains' IntelliJ-based LSP (Mason package
-        --     'kotlin-lsp', binary `intellij-server`). Scoped to Kotlin (.kt)
+        --   • kotlin_lsp — JetBrains' IntelliJ-based LSP, binary `intellij-server`,
+        --     run from the manual ~/.local/share/kotlin-lsp/current symlink (NOT
+        --     the Mason package; see the cmd override below). Scoped to Kotlin (.kt)
         --     ONLY via the filetypes override below. It runs a full IntelliJ-grade
         --     Gradle import that actually understands this 60+ module build; the
         --     lightweight fwcd 'kotlin-language-server' never resolves the
@@ -746,10 +747,13 @@ require('lazy').setup({
         --     sources into bin/. Keeping intellij-server off .java plus forcing
         --     Gradle import (settings in the jdtls config) avoids that.
         --
-        -- NOTE: mason-lspconfig v2 auto-enables every installed server via
-        -- vim.lsp.enable(); the `handlers` table below is no longer consulted,
-        -- so per-server overrides go through vim.lsp.config() instead.
-        kotlin_lsp = {},
+        -- NOTE: neither kotlin_lsp nor jdtls is a key in this table. Both are
+        -- configured via vim.lsp.config() and started by an explicit
+        -- vim.lsp.enable() below, so they skip mason-tool-installer's tbl_keys
+        -- install path and mason-lspconfig's auto-enable. This table only lists
+        -- servers we DO want Mason to install/auto-enable (pyright, lua_ls). The
+        -- `handlers` table below is not consulted in mason-lspconfig v2, so
+        -- per-server overrides go through vim.lsp.config() regardless.
 
         -- clangd = {},
         -- gopls = {},
@@ -798,15 +802,15 @@ require('lazy').setup({
         'stylua', -- Used to format Lua code
 
         -- Java + Kotlin toolchain installed via Mason:
-        --   kotlin-lsp           → JetBrains' IntelliJ-based LSP, scoped to
-        --                          Kotlin (.kt) only (config name kotlin_lsp;
-        --                          ships `intellij-server`)
         --   jdtls                → Eclipse JDT LS for Java (.java), with a
         --                          persistent per-repo -data cache (config below)
         --   google-java-format   → opinionated Java formatter (used by conform)
         --   checkstyle           → Java style linter (nvim-lint), pointed at the
         --                          repo's config/checkstyle/checkstyle.xml
-        'kotlin-lsp',
+        -- Kotlin's server (kotlin_lsp / intellij-server) is deliberately NOT
+        -- installed via Mason: its cmd is pinned to the manually-managed
+        -- ~/.local/share/kotlin-lsp/current symlink (shared with Zed) — see the
+        -- kotlin_lsp cmd override below.
         'jdtls',
         'google-java-format',
         'checkstyle',
@@ -886,7 +890,16 @@ require('lazy').setup({
           end
         end,
         cmd = {
-          'intellij-server',
+          -- Use the manually-managed kotlin-lsp shared with Zed
+          -- (~/.local/share/kotlin-lsp/current, a symlink) instead of the mason
+          -- 'intellij-server' on PATH. These pre-alpha builds carry a HARD
+          -- EXPIRY: the mason 262.4739.0 build expired and silently killed
+          -- Kotlin support ("This build of intellij-server has expired", exit 7).
+          -- Pinning one binary means a single `current` symlink bump updates
+          -- both editors. nvim keeps its OWN --system-path (below), separate
+          -- from Zed's (~/.cache/zed/kotlin-lsp), so the two IntelliJ instances
+          -- never clobber each other's exclusive cache.
+          vim.fn.expand '~/.local/share/kotlin-lsp/current/bin/intellij-server',
           '--stdio',
           '--system-path',
           kotlin_lsp_system_path(),
@@ -997,13 +1010,17 @@ require('lazy').setup({
         },
       }
 
-      -- jdtls is configured above and intentionally enabled for Java. mason-
-      -- lspconfig v2 already auto-enables every installed server via
-      -- vim.lsp.enable(); we make it explicit so Java LSP comes up deterministically
-      -- (our vim.lsp.config('jdtls', …) override supplies cmd + root_dir, so the
-      -- old "attempt to index local 'config'" crash from an unconfigured jdtls
-      -- does not apply).
+      -- jdtls (Java) and kotlin_lsp (Kotlin) are configured above via
+      -- vim.lsp.config() and enabled explicitly here. Neither is a key in the
+      -- `servers` table, so mason-lspconfig's auto-enable does not cover them.
+      -- This also decouples kotlin_lsp from Mason: its binary is the manual
+      -- ~/.local/share/kotlin-lsp/current symlink, so enabling must not depend on
+      -- the (now-removed) Mason 'kotlin-lsp' package being installed. Our
+      -- vim.lsp.config() overrides supply cmd + root_dir for both, so the old
+      -- "attempt to index local 'config'" crash from an unconfigured server does
+      -- not apply.
       vim.lsp.enable('jdtls')
+      vim.lsp.enable('kotlin_lsp')
     end,
   },
 

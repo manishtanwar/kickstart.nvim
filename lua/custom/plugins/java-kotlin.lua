@@ -1,24 +1,30 @@
 -- lua/custom/plugins/java-kotlin.lua
 --
--- Java + Kotlin IDE support for this repo is handled by a SINGLE language
--- server: JetBrains' kotlin-lsp (IntelliJ-based, Mason package 'kotlin-lsp',
--- binary `intellij-server`). Because it is the IntelliJ engine, it indexes and
--- serves BOTH .kt and .java files in the same Gradle workspace, so cross-
--- language navigation/identification (Kotlin → Java and back) works from one
--- index — exactly what you want in this polyglot 60+ module repo.
+-- Java + Kotlin IDE support for this repo is handled by TWO language servers,
+-- split by filetype (both configured in init.lua):
 --
--- It is configured entirely in init.lua:
---   • `servers.kotlin_lsp` in the lspconfig setup
---   • the `vim.lsp.config('kotlin_lsp', …)` override that pins the cache dir and
---     extends `filetypes` to include 'java'
+--   • Java (.java) → jdtls (Eclipse JDT LS, Mason package 'jdtls'). It persists
+--     its workspace model + index under a per-repo `-data` dir and reuses it
+--     incrementally, so it gives a real warm-restart cache for Java.
+--   • Kotlin (.kt) → kotlin_lsp (JetBrains' IntelliJ-based server, binary
+--     `intellij-server`). Its cmd is pinned to the manually-managed
+--     ~/.local/share/kotlin-lsp/current symlink (shared with Zed), NOT the Mason
+--     package. It re-imports Gradle on each start, so we pin --system-path to a
+--     per-repo cache to keep restarts incremental.
 --
--- We deliberately do NOT use nvim-jdtls / Eclipse JDT anymore. Running jdtls
--- alongside kotlin_lsp meant two servers indexing the same tree, and jdtls's
--- Eclipse Gradle import polluted every module with .project/.classpath/
--- .settings/ and copied .kt sources into bin/ output folders. One IntelliJ-grade
--- server avoids all of that.
+-- Each server is scoped to its own filetype via a `filetypes` override, so they
+-- never both index the same buffer. We tried a single IntelliJ server for BOTH
+-- languages, but its Eclipse Gradle import polluted every module with
+-- .project/.classpath/.settings and copied .kt sources into bin/ — jdtls's
+-- forced Buildship import (settings.java.import.gradle) avoids that.
 --
--- Nothing to install here — Mason installs kotlin-lsp via mason-tool-installer
--- in init.lua, and lspconfig handles the rest. This file intentionally declares
+-- Both are configured in init.lua:
+--   • `servers.kotlin_lsp` + the `vim.lsp.config('kotlin_lsp', …)` override
+--     (pins cmd to the manual symlink, cache dir, and filetypes = { 'kotlin' })
+--   • the `vim.lsp.config('jdtls', …)` override (cmd/heap, per-repo -data cache,
+--     root pinned to the top-level settings.gradle, filetypes = { 'java' })
+--
+-- Nothing to install here — Mason installs jdtls via mason-tool-installer in
+-- init.lua, and lspconfig handles the rest. This file intentionally declares
 -- no plugins.
 return {}
